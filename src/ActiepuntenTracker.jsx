@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Upload, CheckCircle2, Circle, ArrowUpDown, Filter, FileText, Calendar, User, ClipboardList, X, ChevronDown, ChevronUp, Download, Trash2, Save, FolderOpen } from 'lucide-react';
+import { Upload, CheckCircle2, Circle, ArrowUpDown, Filter, FileText, Calendar, User, ClipboardList, X, ChevronDown, ChevronUp, Download, Trash2, Save, FolderOpen, List, Plus, Clock } from 'lucide-react';
 
 // Professional Action Point Tracker for Meeting Reports
 // Extracts action points from XML meeting reports and allows tracking execution status
@@ -7,12 +7,16 @@ import { Upload, CheckCircle2, Circle, ArrowUpDown, Filter, FileText, Calendar, 
 export default function ActiepuntenTracker() {
   const [actions, setActions] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: 'datum', direction: 'desc' });
-  const [filterExecuted, setFilterExecuted] = useState('all'); // 'all', 'executed', 'pending'
+  const [filterExecuted, setFilterExecuted] = useState('all'); // 'all', 'executed', 'pending', 'lopende'
   const [filterProject, setFilterProject] = useState('all');
   const [filterResponsible, setFilterResponsible] = useState('all');
   const [isLoading, setIsLoading] = useState(true);
   const [dragOver, setDragOver] = useState(false);
   const [notification, setNotification] = useState(null);
+  
+  // Modal state for steps
+  const [selectedAction, setSelectedAction] = useState(null);
+  const [newStepText, setNewStepText] = useState('');
 
   // Load saved actions from storage on mount
   useEffect(() => {
@@ -77,8 +81,8 @@ export default function ActiepuntenTracker() {
           subject,
           verantwoordelijke: assignee,
           actie: text,
-          uitgevoerd: false,
-          opmerking: '',
+          status: 'open', // 'open', 'lopende', 'afgerond'
+          stappen: [],
           toegevoegdOp: new Date().toISOString()
         });
       }
@@ -149,23 +153,94 @@ export default function ActiepuntenTracker() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // Toggle executed status
-  const toggleExecuted = (id) => {
-    setActions(prev => prev.map(action => 
-      action.id === id ? { ...action, uitgevoerd: !action.uitgevoerd } : action
-    ));
-  };
-
-  // Update remark
-  const updateOpmerking = (id, opmerking) => {
-    setActions(prev => prev.map(action => 
-      action.id === id ? { ...action, opmerking } : action
-    ));
+  // Cycle through status: open -> lopende -> afgerond -> open (but not back to open if there are steps)
+  const cycleStatus = (id) => {
+    setActions(prev => prev.map(action => {
+      if (action.id === id) {
+        const currentStatus = action.status || 'open';
+        const hasSteps = (action.stappen || []).length > 0;
+        let newStatus;
+        if (currentStatus === 'open') newStatus = 'lopende';
+        else if (currentStatus === 'lopende') newStatus = 'afgerond';
+        else {
+          // From afgerond: go back to lopende if has steps, otherwise to open
+          newStatus = hasSteps ? 'lopende' : 'open';
+        }
+        return { ...action, status: newStatus };
+      }
+      return action;
+    }));
   };
 
   // Delete action
   const deleteAction = (id) => {
     setActions(prev => prev.filter(action => action.id !== id));
+  };
+
+  // Open steps modal for an action
+  const openStepsModal = (actionId) => {
+    const action = actions.find(a => a.id === actionId);
+    if (action) {
+      setSelectedAction(action);
+      setNewStepText('');
+    }
+  };
+
+  // Close steps modal
+  const closeStepsModal = () => {
+    setSelectedAction(null);
+    setNewStepText('');
+  };
+
+  // Add a new step to an action
+  const addStep = () => {
+    if (!newStepText.trim() || !selectedAction) return;
+    
+    const now = new Date();
+    const newStep = {
+      id: `step-${Date.now()}`,
+      datum: now.toISOString().split('T')[0],
+      tijd: now.toTimeString().slice(0, 5),
+      beschrijving: newStepText.trim()
+    };
+    
+    setActions(prev => prev.map(action => 
+      action.id === selectedAction.id 
+        ? { 
+            ...action, 
+            stappen: [...(action.stappen || []), newStep],
+            // Automatically set status to 'lopende' when adding steps
+            status: (action.status === 'open' || !action.status) ? 'lopende' : action.status
+          }
+        : action
+    ));
+    
+    // Update selected action to reflect changes
+    setSelectedAction(prev => ({
+      ...prev,
+      stappen: [...(prev.stappen || []), newStep],
+      status: (prev.status === 'open' || !prev.status) ? 'lopende' : prev.status
+    }));
+    
+    setNewStepText('');
+    showNotification('Stap toegevoegd', 'success');
+  };
+
+  // Delete a step from an action
+  const deleteStep = (actionId, stepId) => {
+    setActions(prev => prev.map(action => 
+      action.id === actionId 
+        ? { ...action, stappen: (action.stappen || []).filter(s => s.id !== stepId) }
+        : action
+    ));
+    
+    // Update selected action to reflect changes
+    if (selectedAction && selectedAction.id === actionId) {
+      setSelectedAction(prev => ({
+        ...prev,
+        stappen: (prev.stappen || []).filter(s => s.id !== stepId)
+      }));
+    }
   };
 
   // Clear all data
@@ -196,8 +271,10 @@ export default function ActiepuntenTracker() {
   // Filter and sort actions
   const filteredActions = actions
     .filter(action => {
-      if (filterExecuted === 'executed' && !action.uitgevoerd) return false;
-      if (filterExecuted === 'pending' && action.uitgevoerd) return false;
+      const status = action.status || 'open';
+      if (filterExecuted === 'executed' && status !== 'afgerond') return false;
+      if (filterExecuted === 'pending' && status !== 'open') return false;
+      if (filterExecuted === 'lopende' && status !== 'lopende') return false;
       if (filterProject !== 'all' && action.projectId !== filterProject) return false;
       if (filterResponsible !== 'all' && action.verantwoordelijke !== filterResponsible) return false;
       return true;
@@ -206,9 +283,10 @@ export default function ActiepuntenTracker() {
       let aVal = a[sortConfig.key];
       let bVal = b[sortConfig.key];
       
-      if (sortConfig.key === 'uitgevoerd') {
-        aVal = a.uitgevoerd ? 1 : 0;
-        bVal = b.uitgevoerd ? 1 : 0;
+      if (sortConfig.key === 'status') {
+        const statusOrder = { 'open': 0, 'lopende': 1, 'afgerond': 2 };
+        aVal = statusOrder[a.status || 'open'];
+        bVal = statusOrder[b.status || 'open'];
       }
       
       if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
@@ -218,19 +296,21 @@ export default function ActiepuntenTracker() {
 
   // Stats
   const totalActions = actions.length;
-  const completedActions = actions.filter(a => a.uitgevoerd).length;
-  const pendingActions = totalActions - completedActions;
+  const completedActions = actions.filter(a => (a.status || 'open') === 'afgerond').length;
+  const lopendeActions = actions.filter(a => (a.status || 'open') === 'lopende').length;
+  const pendingActions = actions.filter(a => (a.status || 'open') === 'open').length;
 
   // Export to CSV
   const exportToCSV = () => {
-    const headers = ['Project ID', 'Datum', 'Verantwoordelijke', 'Actie', 'Uitgevoerd', 'Opmerking'];
+    const headers = ['Project ID', 'Datum', 'Verantwoordelijke', 'Actie', 'Stappen', 'Status'];
+    const statusLabels = { 'open': 'Open', 'lopende': 'Lopende', 'afgerond': 'Afgerond' };
     const rows = filteredActions.map(a => [
       a.projectId,
       a.datum,
       a.verantwoordelijke,
       `"${a.actie.replace(/"/g, '""')}"`,
-      a.uitgevoerd ? 'Ja' : 'Nee',
-      `"${a.opmerking.replace(/"/g, '""')}"`
+      (a.stappen || []).length,
+      statusLabels[a.status || 'open']
     ]);
     
     const csv = [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
@@ -289,9 +369,23 @@ export default function ActiepuntenTracker() {
       xml += `      <subject>${escapeXML(action.subject || '')}</subject>\n`;
       xml += `      <verantwoordelijke>${escapeXML(action.verantwoordelijke)}</verantwoordelijke>\n`;
       xml += `      <tekst>${escapeXML(action.actie)}</tekst>\n`;
-      xml += `      <uitgevoerd>${action.uitgevoerd ? 'true' : 'false'}</uitgevoerd>\n`;
-      xml += `      <opmerking>${escapeXML(action.opmerking)}</opmerking>\n`;
+      xml += `      <status>${escapeXML(action.status || 'open')}</status>\n`;
       xml += `      <toegevoegdOp>${escapeXML(action.toegevoegdOp || '')}</toegevoegdOp>\n`;
+      
+      // Export stappen (steps)
+      if (action.stappen && action.stappen.length > 0) {
+        xml += '      <stappen>\n';
+        action.stappen.forEach(stap => {
+          xml += '        <stap>\n';
+          xml += `          <id>${escapeXML(stap.id)}</id>\n`;
+          xml += `          <datum>${escapeXML(stap.datum)}</datum>\n`;
+          xml += `          <tijd>${escapeXML(stap.tijd)}</tijd>\n`;
+          xml += `          <beschrijving>${escapeXML(stap.beschrijving)}</beschrijving>\n`;
+          xml += '        </stap>\n';
+        });
+        xml += '      </stappen>\n';
+      }
+      
       xml += '    </actie>\n';
     });
     
@@ -337,9 +431,28 @@ export default function ActiepuntenTracker() {
       const subject = actionEl.querySelector('subject')?.textContent || '';
       const verantwoordelijke = actionEl.querySelector('verantwoordelijke')?.textContent || 'Niet toegewezen';
       const tekst = actionEl.querySelector('tekst')?.textContent || '';
-      const uitgevoerd = actionEl.querySelector('uitgevoerd')?.textContent === 'true';
-      const opmerking = actionEl.querySelector('opmerking')?.textContent || '';
+      
+      // Support both new 'status' field and legacy 'uitgevoerd' field
+      let status = actionEl.querySelector('status')?.textContent || '';
+      if (!status) {
+        // Backwards compatibility: convert uitgevoerd boolean to status
+        const uitgevoerd = actionEl.querySelector('uitgevoerd')?.textContent === 'true';
+        status = uitgevoerd ? 'afgerond' : 'open';
+      }
+      
       const toegevoegdOp = actionEl.querySelector('toegevoegdOp')?.textContent || '';
+
+      // Parse stappen (steps)
+      const stappen = [];
+      const stapElements = actionEl.querySelectorAll('stappen > stap');
+      stapElements.forEach(stapEl => {
+        stappen.push({
+          id: stapEl.querySelector('id')?.textContent || `step-${Date.now()}-${Math.random()}`,
+          datum: stapEl.querySelector('datum')?.textContent || '',
+          tijd: stapEl.querySelector('tijd')?.textContent || '',
+          beschrijving: stapEl.querySelector('beschrijving')?.textContent || ''
+        });
+      });
 
       if (tekst) {
         loadedActions.push({
@@ -349,8 +462,8 @@ export default function ActiepuntenTracker() {
           subject,
           verantwoordelijke,
           actie: tekst,
-          uitgevoerd,
-          opmerking,
+          status,
+          stappen,
           toegevoegdOp
         });
       }
@@ -533,7 +646,7 @@ export default function ActiepuntenTracker() {
       <main className="max-w-7xl mx-auto px-6 py-8">
         {/* Stats Cards */}
         {actions.length > 0 && (
-          <div className="grid grid-cols-3 gap-4 mb-8">
+          <div className="grid grid-cols-4 gap-4 mb-8">
             <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
@@ -548,22 +661,33 @@ export default function ActiepuntenTracker() {
             <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-500 font-medium">Afgerond</p>
-                  <p className="text-3xl font-bold text-emerald-600 mt-1">{completedActions}</p>
+                  <p className="text-sm text-slate-500 font-medium">Open</p>
+                  <p className="text-3xl font-bold text-slate-600 mt-1">{pendingActions}</p>
                 </div>
-                <div className="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center">
-                  <CheckCircle2 className="text-emerald-500" size={22} />
+                <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center">
+                  <Circle className="text-slate-500" size={22} />
                 </div>
               </div>
             </div>
             <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-slate-500 font-medium">Openstaand</p>
-                  <p className="text-3xl font-bold text-amber-600 mt-1">{pendingActions}</p>
+                  <p className="text-sm text-slate-500 font-medium">Lopende</p>
+                  <p className="text-3xl font-bold text-orange-500 mt-1">{lopendeActions}</p>
                 </div>
-                <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center">
-                  <Circle className="text-amber-500" size={22} />
+                <div className="w-12 h-12 bg-orange-50 rounded-full flex items-center justify-center">
+                  <Clock className="text-orange-500" size={22} />
+                </div>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500 font-medium">Afgerond</p>
+                  <p className="text-3xl font-bold text-emerald-600 mt-1">{completedActions}</p>
+                </div>
+                <div className="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center">
+                  <CheckCircle2 className="text-emerald-500" size={22} />
                 </div>
               </div>
             </div>
@@ -619,7 +743,8 @@ export default function ActiepuntenTracker() {
                   className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="all">Alle</option>
-                  <option value="pending">Openstaand</option>
+                  <option value="pending">Open</option>
+                  <option value="lopende">Lopende</option>
                   <option value="executed">Afgerond</option>
                 </select>
               </div>
@@ -690,9 +815,9 @@ export default function ActiepuntenTracker() {
                     <SortableHeader label="Project" sortKey="projectId" icon={FileText} />
                     <SortableHeader label="Datum" sortKey="datum" icon={Calendar} />
                     <SortableHeader label="Verantwoordelijke" sortKey="verantwoordelijke" icon={User} />
-                    <th className="px-4 py-3 text-left font-semibold">Actie</th>
-                    <SortableHeader label="Status" sortKey="uitgevoerd" icon={CheckCircle2} />
-                    <th className="px-4 py-3 text-left font-semibold">Opmerking uitvoering</th>
+                    <th className="px-4 py-3 text-left font-semibold" style={{ minWidth: '400px' }}>Actie</th>
+                    <th className="px-4 py-3 text-left font-semibold">Stappen</th>
+                    <SortableHeader label="Status" sortKey="status" icon={CheckCircle2} />
                     <th className="px-4 py-3 w-12"></th>
                   </tr>
                 </thead>
@@ -700,7 +825,10 @@ export default function ActiepuntenTracker() {
                   {filteredActions.map((action) => (
                     <tr 
                       key={action.id} 
-                      className={`hover:bg-slate-50 transition-colors ${action.uitgevoerd ? 'bg-emerald-50/30' : ''}`}
+                      className={`hover:bg-slate-50 transition-colors ${
+                        (action.status || 'open') === 'afgerond' ? 'bg-emerald-50/30' : 
+                        (action.status || 'open') === 'lopende' ? 'bg-orange-50/30' : ''
+                      }`}
                     >
                       <td className="px-4 py-4">
                         <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 text-sm font-mono font-medium">
@@ -713,24 +841,41 @@ export default function ActiepuntenTracker() {
                       <td className="px-4 py-4 text-sm text-slate-700 font-medium">
                         {action.verantwoordelijke}
                       </td>
-                      <td className="px-4 py-4 text-sm text-slate-700 max-w-md">
-                        <p className={action.uitgevoerd ? 'line-through text-slate-400' : ''}>
+                      <td className="px-4 py-4 text-sm text-slate-700" style={{ minWidth: '400px' }}>
+                        <p className={(action.status || 'open') === 'afgerond' ? 'line-through text-slate-400' : ''}>
                           {action.actie}
                         </p>
                       </td>
                       <td className="px-4 py-4">
                         <button
-                          onClick={() => toggleExecuted(action.id)}
+                          onClick={() => openStepsModal(action.id)}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all bg-blue-50 text-blue-700 hover:bg-blue-100"
+                          style={{ borderColor: '#1E64C8' }}
+                        >
+                          <List size={14} />
+                          <span>{(action.stappen || []).length}</span>
+                        </button>
+                      </td>
+                      <td className="px-4 py-4">
+                        <button
+                          onClick={() => cycleStatus(action.id)}
                           className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                            action.uitgevoerd
+                            (action.status || 'open') === 'afgerond'
                               ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                              : (action.status || 'open') === 'lopende'
+                              ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
                               : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                           }`}
                         >
-                          {action.uitgevoerd ? (
+                          {(action.status || 'open') === 'afgerond' ? (
                             <>
                               <CheckCircle2 size={16} />
                               <span>Afgerond</span>
+                            </>
+                          ) : (action.status || 'open') === 'lopende' ? (
+                            <>
+                              <Clock size={16} />
+                              <span>Lopende</span>
                             </>
                           ) : (
                             <>
@@ -739,15 +884,6 @@ export default function ActiepuntenTracker() {
                             </>
                           )}
                         </button>
-                      </td>
-                      <td className="px-4 py-4">
-                        <input
-                          type="text"
-                          value={action.opmerking}
-                          onChange={(e) => updateOpmerking(action.id, e.target.value)}
-                          placeholder="Voeg opmerking toe..."
-                          className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white placeholder-slate-400"
-                        />
                       </td>
                       <td className="px-4 py-4">
                         <button
@@ -771,6 +907,94 @@ export default function ActiepuntenTracker() {
           </div>
         )}
       </main>
+
+      {/* Steps Modal */}
+      {selectedAction && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold" style={{ color: '#1E64C8' }}>Stappen</h2>
+                <p className="text-sm text-slate-500 mt-1 line-clamp-1">{selectedAction.actie}</p>
+              </div>
+              <button
+                onClick={closeStepsModal}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <X size={20} className="text-slate-500" />
+              </button>
+            </div>
+            
+            {/* Modal Body - Steps List */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {(!selectedAction.stappen || selectedAction.stappen.length === 0) ? (
+                <div className="text-center py-8 text-slate-400">
+                  <Clock size={40} className="mx-auto mb-3 opacity-50" />
+                  <p>Nog geen stappen geregistreerd</p>
+                  <p className="text-sm mt-1">Voeg hieronder een stap toe</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {selectedAction.stappen.map((stap, index) => (
+                    <div
+                      key={stap.id}
+                      className="flex items-start gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100"
+                    >
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ backgroundColor: '#1E64C8' }}>
+                        {index + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-700">{stap.beschrijving}</p>
+                        <div className="flex items-center gap-3 mt-2 text-xs text-slate-400">
+                          <span className="flex items-center gap-1">
+                            <Calendar size={12} />
+                            {formatDate(stap.datum)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock size={12} />
+                            {stap.tijd}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => deleteStep(selectedAction.id, stap.id)}
+                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Verwijderen"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            {/* Modal Footer - Add Step */}
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl">
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  value={newStepText}
+                  onChange={(e) => setNewStepText(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && addStep()}
+                  placeholder="Beschrijf de stap..."
+                  className="flex-1 text-sm border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                />
+                <button
+                  onClick={addStep}
+                  disabled={!newStepText.trim()}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: newStepText.trim() ? '#1E64C8' : '#94a3b8' }}
+                >
+                  <Plus size={16} />
+                  Toevoegen
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="mt-12 py-6 border-t border-slate-200 bg-white">
