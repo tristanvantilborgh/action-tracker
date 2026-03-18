@@ -500,6 +500,43 @@ export default function ActiepuntenTracker() {
   // Reference for hidden file input
   const loadFileInputRef = useRef(null);
 
+  // Helper function to get text content of direct child element by tag name
+  const getChildText = (parent, tagName) => {
+    const children = parent.childNodes;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.nodeType === 1 && child.nodeName.toLowerCase() === tagName.toLowerCase()) {
+        return child.textContent || '';
+      }
+    }
+    return '';
+  };
+
+  // Helper function to get direct child element by tag name
+  const getChildElement = (parent, tagName) => {
+    const children = parent.childNodes;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.nodeType === 1 && child.nodeName.toLowerCase() === tagName.toLowerCase()) {
+        return child;
+      }
+    }
+    return null;
+  };
+
+  // Helper function to get all direct child elements by tag name
+  const getChildElements = (parent, tagName) => {
+    const result = [];
+    const children = parent.childNodes;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.nodeType === 1 && child.nodeName.toLowerCase() === tagName.toLowerCase()) {
+        result.push(child);
+      }
+    }
+    return result;
+  };
+
   // Parse saved XML file and load actions
   const parseTrackerXML = (xmlString) => {
     const parser = new DOMParser();
@@ -511,66 +548,78 @@ export default function ActiepuntenTracker() {
     }
 
     // Check if this is a tracker XML file
-    const roots = xmlDoc.getElementsByTagName('actiepunten_tracker');
-    if (roots.length === 0) {
+    const root = xmlDoc.documentElement;
+    if (!root || root.nodeName.toLowerCase() !== 'actiepunten_tracker') {
       throw new Error('Dit is geen geldig actiepunten tracker bestand');
     }
-    const root = roots[0];
 
-    // Use getElementsByTagName for more reliable parsing
-    const actiesContainers = root.getElementsByTagName('acties');
-    if (actiesContainers.length === 0) {
+    // Find acties container
+    const actiesContainer = getChildElement(root, 'acties');
+    if (!actiesContainer) {
       throw new Error('Geen acties gevonden in bestand');
     }
-    const actiesContainer = actiesContainers[0];
     
-    const actionElements = actiesContainer.getElementsByTagName('actie');
+    const actionElements = getChildElements(actiesContainer, 'actie');
     const loadedActions = [];
 
     for (let i = 0; i < actionElements.length; i++) {
       const actionEl = actionElements[i];
       
-      // Use getElementsByTagName for reliable direct child access
-      const id = actionEl.getElementsByTagName('id')[0]?.textContent || `loaded-${Date.now()}-${Math.random()}`;
-      const projectId = actionEl.getElementsByTagName('projectId')[0]?.textContent || 'Onbekend';
-      const datum = actionEl.getElementsByTagName('datum')[0]?.textContent || '';
-      const subject = actionEl.getElementsByTagName('subject')[0]?.textContent || '';
-      const verantwoordelijke = actionEl.getElementsByTagName('verantwoordelijke')[0]?.textContent || 'Niet toegewezen';
-      const tekst = actionEl.getElementsByTagName('tekst')[0]?.textContent || '';
+      // Get direct child values
+      const id = getChildText(actionEl, 'id') || `loaded-${Date.now()}-${Math.random()}`;
+      const projectId = getChildText(actionEl, 'projectId') || 'Onbekend';
+      const datum = getChildText(actionEl, 'datum') || '';
+      const subject = getChildText(actionEl, 'subject') || '';
+      const verantwoordelijke = getChildText(actionEl, 'verantwoordelijke') || 'Niet toegewezen';
+      const tekst = getChildText(actionEl, 'tekst') || '';
       
-      // Support both new 'status' field and legacy 'uitgevoerd' field
-      let status = actionEl.getElementsByTagName('status')[0]?.textContent || '';
+      // Get status - support both new 'status' field and legacy 'uitgevoerd' field
+      let status = getChildText(actionEl, 'status');
       if (!status) {
         // Backwards compatibility: convert uitgevoerd boolean to status
-        const uitgevoerd = actionEl.getElementsByTagName('uitgevoerd')[0]?.textContent === 'true';
+        const uitgevoerd = getChildText(actionEl, 'uitgevoerd') === 'true';
         status = uitgevoerd ? 'afgerond' : 'open';
       }
+      // Validate status
+      if (!['open', 'lopende', 'afgerond'].includes(status)) {
+        status = 'open';
+      }
       
-      const toegevoegdOp = actionEl.getElementsByTagName('toegevoegdOp')[0]?.textContent || '';
+      const toegevoegdOp = getChildText(actionEl, 'toegevoegdOp') || '';
 
-      // Parse stappen (steps) - use explicit element traversal for reliability
+      // Parse stappen (steps)
       const stappen = [];
-      const stappenContainers = actionEl.getElementsByTagName('stappen');
-      if (stappenContainers.length > 0) {
-        const stappenContainer = stappenContainers[0];
-        const stapElements = stappenContainer.getElementsByTagName('stap');
+      const stappenContainer = getChildElement(actionEl, 'stappen');
+      if (stappenContainer) {
+        const stapElements = getChildElements(stappenContainer, 'stap');
         for (let j = 0; j < stapElements.length; j++) {
           const stapEl = stapElements[j];
-          // Use getElementsByTagName to avoid selector context issues
-          const stapId = stapEl.getElementsByTagName('id')[0]?.textContent || `step-${Date.now()}-${Math.random()}`;
-          const stapDatum = stapEl.getElementsByTagName('datum')[0]?.textContent || '';
-          const stapTijd = stapEl.getElementsByTagName('tijd')[0]?.textContent || '';
-          const stapBeschrijving = stapEl.getElementsByTagName('beschrijving')[0]?.textContent || '';
           stappen.push({
-            id: stapId,
-            datum: stapDatum,
-            tijd: stapTijd,
-            beschrijving: stapBeschrijving
+            id: getChildText(stapEl, 'id') || `step-${Date.now()}-${Math.random()}`,
+            datum: getChildText(stapEl, 'datum') || '',
+            tijd: getChildText(stapEl, 'tijd') || '',
+            beschrijving: getChildText(stapEl, 'beschrijving') || ''
           });
         }
       }
 
       if (tekst) {
+        loadedActions.push({
+          id,
+          projectId,
+          datum,
+          subject,
+          verantwoordelijke,
+          actie: tekst,
+          status,
+          stappen,
+          toegevoegdOp
+        });
+      }
+    }
+
+    return loadedActions;
+  };
         loadedActions.push({
           id,
           projectId,
@@ -606,8 +655,15 @@ export default function ActiepuntenTracker() {
 
       // Replace all current actions with loaded ones
       setActions(loadedActions);
-      showNotification(`${loadedActions.length} actiepunt${loadedActions.length > 1 ? 'en' : ''} geladen`, 'success');
+      
+      // Count stats for notification
+      const withStappen = loadedActions.filter(a => a.stappen && a.stappen.length > 0).length;
+      const lopende = loadedActions.filter(a => a.status === 'lopende').length;
+      const afgerond = loadedActions.filter(a => a.status === 'afgerond').length;
+      
+      showNotification(`${loadedActions.length} actiepunten geladen (${lopende} lopende, ${afgerond} afgerond, ${withStappen} met stappen)`, 'success');
     } catch (error) {
+      console.error('Load error:', error);
       showNotification(`Fout bij laden: ${error.message}`, 'error');
     }
   };
