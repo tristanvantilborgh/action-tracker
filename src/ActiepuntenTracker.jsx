@@ -740,7 +740,10 @@ export default function ActiepuntenTracker() {
         <div className="max-w-7xl mx-auto px-6 py-5">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#1E64C8' }}>ACTIEPUNTEN</h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#1E64C8' }}>ACTIEPUNTEN</h1>
+                <span className="text-sm text-slate-500"><span className="font-bold">Versie</span> 2.1</span>
+              </div>
               <p className="text-sm text-slate-500">Beheer van actiepunten uit vergaderverslagen</p>
             </div>
             
