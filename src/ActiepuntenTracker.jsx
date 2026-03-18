@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Upload, CheckCircle2, Circle, ArrowUpDown, Filter, FileText, Calendar, User, ClipboardList, X, ChevronDown, ChevronUp, Download, Trash2, Save, FolderOpen, List, Plus, Clock } from 'lucide-react';
+import { Upload, CheckCircle2, Circle, ArrowUpDown, Filter, FileText, Calendar, User, ClipboardList, X, ChevronDown, ChevronUp, Download, Trash2, Save, FolderOpen, List, Plus, Clock, Pencil } from 'lucide-react';
 
 // Professional Action Point Tracker for Meeting Reports
 // Extracts action points from XML meeting reports and allows tracking execution status
@@ -17,6 +17,16 @@ export default function ActiepuntenTracker() {
   // Modal state for steps
   const [selectedAction, setSelectedAction] = useState(null);
   const [newStepText, setNewStepText] = useState('');
+  
+  // Modal state for edit/create action
+  const [editingAction, setEditingAction] = useState(null);
+  const [showNewActionModal, setShowNewActionModal] = useState(false);
+  const [actionForm, setActionForm] = useState({
+    projectId: '',
+    datum: '',
+    verantwoordelijke: '',
+    actie: ''
+  });
 
   // Load saved actions from storage on mount
   useEffect(() => {
@@ -243,6 +253,91 @@ export default function ActiepuntenTracker() {
     }
   };
 
+  // Open new action modal
+  const openNewActionModal = () => {
+    setActionForm({
+      projectId: '',
+      datum: new Date().toISOString().split('T')[0],
+      verantwoordelijke: '',
+      actie: ''
+    });
+    setShowNewActionModal(true);
+    setEditingAction(null);
+  };
+
+  // Open edit action modal
+  const openEditActionModal = (action) => {
+    setActionForm({
+      projectId: action.projectId,
+      datum: action.datum,
+      verantwoordelijke: action.verantwoordelijke,
+      actie: action.actie
+    });
+    setEditingAction(action);
+    setShowNewActionModal(false);
+  };
+
+  // Close action modal
+  const closeActionModal = () => {
+    setShowNewActionModal(false);
+    setEditingAction(null);
+    setActionForm({
+      projectId: '',
+      datum: '',
+      verantwoordelijke: '',
+      actie: ''
+    });
+  };
+
+  // Save new or edited action
+  const saveAction = () => {
+    if (!actionForm.actie.trim()) {
+      showNotification('Vul de actie in', 'error');
+      return;
+    }
+    if (!actionForm.projectId.trim()) {
+      showNotification('Vul het project ID in', 'error');
+      return;
+    }
+    if (!actionForm.verantwoordelijke.trim()) {
+      showNotification('Vul de verantwoordelijke in', 'error');
+      return;
+    }
+
+    if (editingAction) {
+      // Update existing action
+      setActions(prev => prev.map(action => 
+        action.id === editingAction.id 
+          ? { 
+              ...action, 
+              projectId: actionForm.projectId.trim(),
+              datum: actionForm.datum,
+              verantwoordelijke: actionForm.verantwoordelijke.trim(),
+              actie: actionForm.actie.trim()
+            }
+          : action
+      ));
+      showNotification('Actiepunt bijgewerkt', 'success');
+    } else {
+      // Create new action
+      const newAction = {
+        id: `manual-${Date.now()}`,
+        projectId: actionForm.projectId.trim(),
+        datum: actionForm.datum,
+        subject: '',
+        verantwoordelijke: actionForm.verantwoordelijke.trim(),
+        actie: actionForm.actie.trim(),
+        status: 'open',
+        stappen: [],
+        toegevoegdOp: new Date().toISOString()
+      };
+      setActions(prev => [...prev, newAction]);
+      showNotification('Actiepunt toegevoegd', 'success');
+    }
+    
+    closeActionModal();
+  };
+
   // Clear all data
   const clearAllData = async () => {
     if (window.confirm('Weet je zeker dat je alle actiepunten wilt verwijderen?')) {
@@ -416,43 +511,64 @@ export default function ActiepuntenTracker() {
     }
 
     // Check if this is a tracker XML file
-    const root = xmlDoc.querySelector('actiepunten_tracker');
-    if (!root) {
+    const roots = xmlDoc.getElementsByTagName('actiepunten_tracker');
+    if (roots.length === 0) {
       throw new Error('Dit is geen geldig actiepunten tracker bestand');
     }
+    const root = roots[0];
 
-    const actionElements = xmlDoc.querySelectorAll('acties > actie');
+    // Use getElementsByTagName for more reliable parsing
+    const actiesContainers = root.getElementsByTagName('acties');
+    if (actiesContainers.length === 0) {
+      throw new Error('Geen acties gevonden in bestand');
+    }
+    const actiesContainer = actiesContainers[0];
+    
+    const actionElements = actiesContainer.getElementsByTagName('actie');
     const loadedActions = [];
 
-    actionElements.forEach(actionEl => {
-      const id = actionEl.querySelector('id')?.textContent || `loaded-${Date.now()}-${Math.random()}`;
-      const projectId = actionEl.querySelector('projectId')?.textContent || 'Onbekend';
-      const datum = actionEl.querySelector('datum')?.textContent || '';
-      const subject = actionEl.querySelector('subject')?.textContent || '';
-      const verantwoordelijke = actionEl.querySelector('verantwoordelijke')?.textContent || 'Niet toegewezen';
-      const tekst = actionEl.querySelector('tekst')?.textContent || '';
+    for (let i = 0; i < actionElements.length; i++) {
+      const actionEl = actionElements[i];
+      
+      // Use getElementsByTagName for reliable direct child access
+      const id = actionEl.getElementsByTagName('id')[0]?.textContent || `loaded-${Date.now()}-${Math.random()}`;
+      const projectId = actionEl.getElementsByTagName('projectId')[0]?.textContent || 'Onbekend';
+      const datum = actionEl.getElementsByTagName('datum')[0]?.textContent || '';
+      const subject = actionEl.getElementsByTagName('subject')[0]?.textContent || '';
+      const verantwoordelijke = actionEl.getElementsByTagName('verantwoordelijke')[0]?.textContent || 'Niet toegewezen';
+      const tekst = actionEl.getElementsByTagName('tekst')[0]?.textContent || '';
       
       // Support both new 'status' field and legacy 'uitgevoerd' field
-      let status = actionEl.querySelector('status')?.textContent || '';
+      let status = actionEl.getElementsByTagName('status')[0]?.textContent || '';
       if (!status) {
         // Backwards compatibility: convert uitgevoerd boolean to status
-        const uitgevoerd = actionEl.querySelector('uitgevoerd')?.textContent === 'true';
+        const uitgevoerd = actionEl.getElementsByTagName('uitgevoerd')[0]?.textContent === 'true';
         status = uitgevoerd ? 'afgerond' : 'open';
       }
       
-      const toegevoegdOp = actionEl.querySelector('toegevoegdOp')?.textContent || '';
+      const toegevoegdOp = actionEl.getElementsByTagName('toegevoegdOp')[0]?.textContent || '';
 
-      // Parse stappen (steps)
+      // Parse stappen (steps) - use explicit element traversal for reliability
       const stappen = [];
-      const stapElements = actionEl.querySelectorAll('stappen > stap');
-      stapElements.forEach(stapEl => {
-        stappen.push({
-          id: stapEl.querySelector('id')?.textContent || `step-${Date.now()}-${Math.random()}`,
-          datum: stapEl.querySelector('datum')?.textContent || '',
-          tijd: stapEl.querySelector('tijd')?.textContent || '',
-          beschrijving: stapEl.querySelector('beschrijving')?.textContent || ''
-        });
-      });
+      const stappenContainers = actionEl.getElementsByTagName('stappen');
+      if (stappenContainers.length > 0) {
+        const stappenContainer = stappenContainers[0];
+        const stapElements = stappenContainer.getElementsByTagName('stap');
+        for (let j = 0; j < stapElements.length; j++) {
+          const stapEl = stapElements[j];
+          // Use getElementsByTagName to avoid selector context issues
+          const stapId = stapEl.getElementsByTagName('id')[0]?.textContent || `step-${Date.now()}-${Math.random()}`;
+          const stapDatum = stapEl.getElementsByTagName('datum')[0]?.textContent || '';
+          const stapTijd = stapEl.getElementsByTagName('tijd')[0]?.textContent || '';
+          const stapBeschrijving = stapEl.getElementsByTagName('beschrijving')[0]?.textContent || '';
+          stappen.push({
+            id: stapId,
+            datum: stapDatum,
+            tijd: stapTijd,
+            beschrijving: stapBeschrijving
+          });
+        }
+      }
 
       if (tekst) {
         loadedActions.push({
@@ -467,7 +583,7 @@ export default function ActiepuntenTracker() {
           toegevoegdOp
         });
       }
-    });
+    }
 
     return loadedActions;
   };
@@ -575,6 +691,17 @@ export default function ActiepuntenTracker() {
             {actions.length > 0 && (
               <div className="flex items-center gap-3">
                 <button
+                  onClick={openNewActionModal}
+                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-colors text-sm font-medium"
+                  style={{ backgroundColor: '#10b981' }}
+                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#059669'}
+                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#10b981'}
+                >
+                  <Plus size={16} />
+                  Nieuw
+                </button>
+                <div className="w-px h-6 bg-slate-200 mx-1"></div>
+                <button
                   onClick={saveToXML}
                   className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-colors text-sm font-medium"
                   style={{ backgroundColor: '#1E64C8' }}
@@ -607,7 +734,7 @@ export default function ActiepuntenTracker() {
                   className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors text-sm font-medium"
                 >
                   <Download size={16} />
-                  Exporteer CSV
+                  CSV
                 </button>
                 <button
                   onClick={clearAllData}
@@ -620,6 +747,16 @@ export default function ActiepuntenTracker() {
             )}
             {actions.length === 0 && (
               <div className="flex items-center gap-3">
+                <button
+                  onClick={openNewActionModal}
+                  className="flex items-center gap-2 px-4 py-2 text-white rounded-lg transition-colors text-sm font-medium"
+                  style={{ backgroundColor: '#10b981' }}
+                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#059669'}
+                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#10b981'}
+                >
+                  <Plus size={16} />
+                  Nieuw
+                </button>
                 <button
                   onClick={() => loadFileInputRef.current?.click()}
                   className="flex items-center gap-2 px-4 py-2 border-2 rounded-lg transition-colors text-sm font-medium"
@@ -818,7 +955,7 @@ export default function ActiepuntenTracker() {
                     <th className="px-4 py-3 text-left font-semibold" style={{ minWidth: '400px' }}>Actie</th>
                     <th className="px-4 py-3 text-left font-semibold">Stappen</th>
                     <SortableHeader label="Status" sortKey="status" icon={CheckCircle2} />
-                    <th className="px-4 py-3 w-12"></th>
+                    <th className="px-4 py-3 w-20"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -886,13 +1023,22 @@ export default function ActiepuntenTracker() {
                         </button>
                       </td>
                       <td className="px-4 py-4">
-                        <button
-                          onClick={() => deleteAction(action.id)}
-                          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Verwijderen"
-                        >
-                          <X size={16} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => openEditActionModal(action)}
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Bewerken"
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            onClick={() => deleteAction(action.id)}
+                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Verwijderen"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -991,6 +1137,92 @@ export default function ActiepuntenTracker() {
                   Toevoegen
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit/Create Action Modal */}
+      {(showNewActionModal || editingAction) && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="text-lg font-bold" style={{ color: '#1E64C8' }}>
+                {editingAction ? 'Actiepunt bewerken' : 'Nieuw actiepunt'}
+              </h2>
+              <button
+                onClick={closeActionModal}
+                className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <X size={20} className="text-slate-500" />
+              </button>
+            </div>
+            
+            {/* Modal Body - Form */}
+            <div className="px-6 py-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Project ID *</label>
+                <input
+                  type="text"
+                  value={actionForm.projectId}
+                  onChange={(e) => setActionForm(prev => ({ ...prev, projectId: e.target.value }))}
+                  placeholder="bijv. PR3ARCHIT"
+                  className="w-full text-sm border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Datum *</label>
+                <input
+                  type="date"
+                  value={actionForm.datum}
+                  onChange={(e) => setActionForm(prev => ({ ...prev, datum: e.target.value }))}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Verantwoordelijke *</label>
+                <input
+                  type="text"
+                  value={actionForm.verantwoordelijke}
+                  onChange={(e) => setActionForm(prev => ({ ...prev, verantwoordelijke: e.target.value }))}
+                  placeholder="Naam van de verantwoordelijke"
+                  className="w-full text-sm border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Actie *</label>
+                <textarea
+                  value={actionForm.actie}
+                  onChange={(e) => setActionForm(prev => ({ ...prev, actie: e.target.value }))}
+                  placeholder="Beschrijf het actiepunt..."
+                  rows={4}
+                  className="w-full text-sm border border-slate-200 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                />
+              </div>
+            </div>
+            
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl flex justify-end gap-3">
+              <button
+                onClick={closeActionModal}
+                className="px-4 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-200 transition-colors"
+              >
+                Annuleren
+              </button>
+              <button
+                onClick={saveAction}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white transition-all"
+                style={{ backgroundColor: '#1E64C8' }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#174ea0'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#1E64C8'}
+              >
+                <Save size={16} />
+                {editingAction ? 'Opslaan' : 'Toevoegen'}
+              </button>
             </div>
           </div>
         </div>
